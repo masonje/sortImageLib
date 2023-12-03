@@ -5,7 +5,25 @@ import logging
 from datetime import datetime
 from dateutil import parser
 import shutil
+import platform
 
+def creation_date(path_to_file):
+    """
+    Try to get the date that a file was created, falling back to when it was
+    last modified if that isn't possible.
+    See http://stackoverflow.com/a/39501288/1709587 for explanation.
+    """
+    if platform.system() == 'Windows':
+        return os.path.getctime(path_to_file)
+    else:
+        stat = os.stat(path_to_file)
+        try:
+            return stat.st_birthtime
+        except AttributeError:
+            # We're probably on Linux. No easy way to get creation dates here,
+            # so we'll settle for when its content was last modified.
+            return stat.st_mtime
+        
 def move_file(source_path, destination_folder):
     try:
         # Ensure the source file exists
@@ -135,7 +153,7 @@ if __name__ == "__main__":
     logger = setup_logging(log_file_path)
 
     dir_file = "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures/"
-    dir_scan = dir_file + "CameraUploads/Camera/"
+    dir_scan = dir_file + "CameraUploads/Instagram/"
 
     result_list = list_all_files_and_folders(dir_scan)
 
@@ -151,31 +169,39 @@ if __name__ == "__main__":
             process_file = False
             pdt = '2000:01:01 00:00:00'
             pdt_format = '%Y:%m:%d %H:%M:%S'
+            fname = os.path.basename(item)
 
             if file_extension == '.jpg':
                 file_info = extract_metadata(item)
                 if "DateTimeOriginal" in file_info.keys():
                     pdt = file_info['DateTimeOriginal']
+                else:
+                    pdt = datetime.utcfromtimestamp(creation_date(item)).strftime(pdt_format)
                 process_file = True
             elif file_extension == '.mp4':
-                fname = os.path.basename(item)
-                dy = fname[:4]
-                dm = fname[4:6]
-                dd = fname[6:8]
-                pdt = "{}:{}:{} 00:00:00".format(dy, dm, dd)
-                logger.debug("Format build: {}".format(pdt))
+                try:
+                    dy = fname[:4]
+                    dm = fname[4:6]
+                    dd = fname[6:8]
+                    pdt = "{}:{}:{} 00:00:00".format(dy, dm, dd)
+                    logger.debug("Format build: {}".format(pdt))
 
-                #validate all of the date values pulled
-                if int(dy) in range(2000, 2050):
-                    if int(dm) in range(1, 13):
-                        if int(dd) in range(1, 32):
-                            process_file = True
+                    #validate all of the date values pulled
+                    if int(dy) in range(2000, 2050):
+                        if int(dm) in range(1, 13):
+                            if int(dd) in range(1, 32):
+                                process_file = True
+                            else:
+                                exit_error("Projected date out of expected range 1-31 {}".format(pdt))
                         else:
-                            exit_error("Projected date out of expected range 1-31 {}".format(pdt))
+                            exit_error("Projected month out of expected range 1-12 {}".format(pdt))
                     else:
-                        exit_error("Projected month out of expected range 1-12 {}".format(pdt))
-                else:
-                    exit_error("Projected year out of expected range 2000-2050 {}".format(pdt))
+                        exit_error("Projected year out of expected range 2000-2050 {}".format(pdt))
+                except Exception as err:
+                    logger.error("Processing date from file name {}".format(fname))
+                    logger.error(f"Unexpected {err=}, {type(err)=}")
+            else:
+                logger.warn("Unknown file type in {}".format(fname) )
 
             #ensure we want to process that type of file
             if process_file:
@@ -196,8 +222,8 @@ if __name__ == "__main__":
                 dir_move_to = dir_file + str(dt.year) + "/" + dm + "/" + dd + "/"
                 if create_folder_path(dir_move_to):
                     if move_file(item, dir_move_to):
-                        logger.info("Successfully moved " + item + " -to- " + dir_move_to)
+                        logger.info("Successfully moved " + fname + " -to- " + dir_move_to)
                     else:
-                        logger.error("failed to moved " + item + " -to- " + dir_move_to)
+                        logger.error("failed to moved " + fname + " -to- " + dir_move_to)
             else:
                 logger.info("Skipping file: " + item)
