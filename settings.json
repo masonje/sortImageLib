@@ -1,0 +1,14 @@
+{
+    "logfile": "logs/sortImages.log",
+    "scanRoot": "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures",
+    "scanDir": "CameraUploads",
+    "scanDirs": [
+        "Internal storage/DCIM/Camera/",
+        "Internal storage/DCIM/Videocaptures/",
+        "Internal storage/DCIM/Video Editor/",
+        "Internal storage/Download/",
+        "Camera",
+        "Pixaloop"
+    ],
+    "targetRootDir": "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures"
+}

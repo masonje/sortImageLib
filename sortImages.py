@@ -6,7 +6,23 @@ from datetime import datetime
 from dateutil import parser
 import shutil
 import platform
+import json
 
+def read_settings_from_json(file_path):
+    try:
+        with open(file_path, 'r') as json_file:
+            settings = json.load(json_file)
+            return settings
+    except FileNotFoundError:
+        print(f"File not found: {file_path}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON file: {e}")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
+    
 def creation_date(path_to_file):
     logger.debug("Getting date for: {}".format(path_to_file))
     if platform.system() == 'Windows':
@@ -18,8 +34,8 @@ def creation_date(path_to_file):
         except AttributeError:
             # We're probably on Linux. No easy way to get creation dates here,
             # so we'll settle for when its content was last modified.
+            logger.warning("Error getting st_birthtime, returning st_mtime")
             return stat.st_mtime
-            logger.warn("Error getting st_birthtime, returning st_mtime")
         
 def move_file(source_path, destination_folder):
     try:
@@ -142,93 +158,132 @@ def extract_metadata(image_path):
                     logger.debug(" -{}:{}".format({tag_name},{value}))
                     #print(f"{tag_name}: {value}")
         else:
-            logger.warn("No Exif data found.")
+            logger.warning("No Exif data found.")
     return ret
 
 def exit_error(string_error):
     logger.error("Quitting on error: {}".format(string_error))
-    quit(1)
+    exit(1)
+
+def get_json_value(json_object, key):
+    try:
+        # Attempt to retrieve the value for the given key
+        value = json_object[key]
+        return value
+    except KeyError:
+        print(f"Key '{key}' not found in the JSON object.")
+        return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
 
 if __name__ == "__main__":
-    log_file_path = "logs/sortImages.log"
-    logger = setup_logging(log_file_path, logging.DEBUG)
+    json_file_path = "./settings.json"
+    settings = read_settings_from_json(json_file_path)
 
-    dir_file = "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures/"
-    dir_scan = dir_file + "CameraUploads/Camera/"
+    log_file_path = get_json_value(settings, "logfile")
+    dir_file = get_json_value(settings, "scanRoot")
+    dirs_scan = get_json_value(settings, "scanDirs")
+    dir_scan_core = get_json_value(settings, "scanDir")
 
-    logger.info("---------------------------------------------------")
+    targetRootDir = get_json_value(settings, "targetRootDir")
+
+
+    logger = setup_logging(log_file_path)
+    #logger = setup_logging(log_file_path, logging.DEBUG)
+    logger.info("------------------------------------------------------------------------------------------------------")
+
     logger.info("Base dir for sorting: {}".format(dir_file))
-    logger.info("Scanning dir: {}".format(dir_scan))
+    logger.info("Dir to push file too: {}".format(targetRootDir))
 
-    result_list = list_all_files_and_folders(dir_scan)
+    for ds in dirs_scan:
+        dir_scan = "{}/{}/{}".format(dir_file, dir_scan_core, ds)
 
-    for item in result_list:
-        logger.debug("File: " + item)
-        if os.path.isdir(item):
-            logger.debug("Skipping folder " + item)
-        else:
-            split_tup = os.path.splitext(item)
-            file_name = split_tup[0]
-            file_extension = split_tup[1]
+        logger.info("-------------------")
+        logger.info("Scanning dir: {}".format(dir_scan))
 
-            process_file = False
-            pdt = '2000:01:01 00:00:00'
-            pdt_format = '%Y:%m:%d %H:%M:%S'
-            fname = os.path.basename(item)
+        result_list = list_all_files_and_folders(dir_scan)
+        logger.info("Number of items returned: {}".format(str(len(result_list))))
 
-            if file_extension == '.jpg':
-                file_info = extract_metadata(item)
-                if "DateTimeOriginal" in file_info.keys():
-                    pdt = file_info['DateTimeOriginal']
-                else:
+        for item in result_list:
+            logger.debug("File: " + item)
+            if os.path.isdir(item):
+                logger.debug("Skipping folder " + item)
+            else:
+                split_tup = os.path.splitext(item)
+                file_name = split_tup[0]
+                file_extension = split_tup[1]
+
+                process_file = False
+                pdt = '2000:01:01 00:00:00'
+                pdt_format = '%Y:%m:%d %H:%M:%S'
+                fname = os.path.basename(item)
+
+                if file_extension.lower() in ['.jpg','.jpeg']:
+                    file_info = extract_metadata(item)
+                    if "DateTimeOriginal" in file_info.keys():
+                        pdt = file_info['DateTimeOriginal']
+                    else:
+                        pdt = datetime.utcfromtimestamp(creation_date(item)).strftime(pdt_format)
+                    process_file = True
+
+                elif file_extension.lower() == '.gif':
                     pdt = datetime.utcfromtimestamp(creation_date(item)).strftime(pdt_format)
-                process_file = True
-            elif file_extension == '.mp4':
-                try:
-                    dy = fname[:4]
-                    dm = fname[4:6]
-                    dd = fname[6:8]
-                    pdt = "{}:{}:{} 00:00:00".format(dy, dm, dd)
-                    logger.debug("Format build: {}".format(pdt))
+                    process_file = True
+                elif file_extension.lower() == '.png':
+                    pdt = datetime.utcfromtimestamp(creation_date(item)).strftime(pdt_format)
+                    process_file = True
 
-                    #validate all of the date values pulled
-                    if int(dy) in range(2000, 2050):
-                        if int(dm) in range(1, 13):
-                            if int(dd) in range(1, 32):
-                                process_file = True
+                elif file_extension.lower() == '.mp4':
+                    try:
+                        fname = fname.strip("VID_")
+                        dy = fname[:4]
+                        dm = fname[4:6]
+                        dd = fname[6:8]
+                        pdt = "{}:{}:{} 00:00:00".format(dy, dm, dd)
+                        logger.debug("Format build: {}".format(pdt))
+
+                        #validate all of the date values pulled
+                        if int(dy) in range(2000, 2050):
+                            if int(dm) in range(1, 13):
+                                if int(dd) in range(1, 32):
+                                    process_file = True
+                                else:
+                                    exit_error("Projected date out of expected range 1-31 {}".format(pdt))
                             else:
-                                exit_error("Projected date out of expected range 1-31 {}".format(pdt))
+                                exit_error("Projected month out of expected range 1-12 {}".format(pdt))
                         else:
-                            exit_error("Projected month out of expected range 1-12 {}".format(pdt))
-                    else:
-                        exit_error("Projected year out of expected range 2000-2050 {}".format(pdt))
-                except Exception as err:
-                    logger.error("Processing date from file name {}".format(fname))
-                    logger.error(f"Unexpected {err=}, {type(err)=}")
-            else:
-                logger.warn("Unknown file type in {}".format(fname) )
-
-            #ensure we want to process that type of file
-            if process_file:
-                dt = datetime.strptime(pdt, pdt_format)
-                if (len(str(dt.month)) == 1):
-                    dm = "0" + str(dt.month)
+                            exit_error("Projected year out of expected range 2000-2050 {}".format(pdt))
+                    except Exception as err:
+                        logger.error("Processing date from file name {}".format(fname))
+                        logger.error(f"Unexpected {err=}, {type(err)=}")
                 else:
-                    dm = str(dt.month)
+                    logger.warning("Unknown file type in {}".format(fname) )
 
-                if (len(str(dt.day)) == 1):
-                    dd = "0" + str(dt.day)
-                else:
-                    dd = str(dt.day)
-
-                if (len(str(dt.year)) != 4):
-                    exit_error("Year isn't 4 digits long: " + str(dt.year))
-
-                dir_move_to = dir_file + str(dt.year) + "/" + dm + "/" + dd + "/"
-                if create_folder_path(dir_move_to):
-                    if move_file(item, dir_move_to):
-                        logger.info("Successfully moved " + fname + " -to- " + dir_move_to.strip(dir_file))
+                #ensure we want to process that type of file
+                if process_file:
+                    dt = datetime.strptime(pdt, pdt_format)
+                    if (len(str(dt.month)) == 1):
+                        dm = "0" + str(dt.month)
                     else:
-                        logger.error("failed to moved " + fname + " -to- " + dir_move_to.strip(dir_file))
-            else:
-                logger.info("Skipping file: " + item)
+                        dm = str(dt.month)
+
+                    if (len(str(dt.day)) == 1):
+                        dd = "0" + str(dt.day)
+                    else:
+                        dd = str(dt.day)
+
+                    if (len(str(dt.year)) != 4):
+                        exit_error("Year isn't 4 digits long: " + str(dt.year))
+
+                    dir_move_to = "{}/{}/{}/{}".format(targetRootDir, str(dt.year), dm, dd)
+                    if create_folder_path(dir_move_to):
+                        logger.debug("Moving {} -to- {}".format(item, dir_move_to))
+                        if move_file(item, dir_move_to):
+                            logger.info("Successfully moved {} -to- {}".format(fname,dir_move_to.strip(targetRootDir)))
+                        else:
+                            logger.error("failed to moved {} -to- {}".format(fname,dir_move_to.strip(targetRootDir)))
+                else:
+                    logger.info("Skipping file: " + item)
+        logger.info("Scan/management of dir complete: {}".format(dir_scan))
+    logger.info("Script Complete")
