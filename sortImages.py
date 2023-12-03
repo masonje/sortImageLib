@@ -8,11 +8,7 @@ import shutil
 import platform
 
 def creation_date(path_to_file):
-    """
-    Try to get the date that a file was created, falling back to when it was
-    last modified if that isn't possible.
-    See http://stackoverflow.com/a/39501288/1709587 for explanation.
-    """
+    logger.debug("Getting date for: {}".format(path_to_file))
     if platform.system() == 'Windows':
         return os.path.getctime(path_to_file)
     else:
@@ -23,6 +19,7 @@ def creation_date(path_to_file):
             # We're probably on Linux. No easy way to get creation dates here,
             # so we'll settle for when its content was last modified.
             return stat.st_mtime
+            logger.warn("Error getting st_birthtime, returning st_mtime")
         
 def move_file(source_path, destination_folder):
     try:
@@ -34,14 +31,15 @@ def move_file(source_path, destination_folder):
             
             # Move the file to the destination folder
             shutil.move(source_path, os.path.join(destination_folder, os.path.basename(source_path)))
-            print(f"File '{source_path}' moved to '{destination_folder}' successfully.")
+            logger.debug(f"File '{source_path}' moved to '{destination_folder}' successfully.")
             return True
         else:
-            print(f"Source file '{source_path}' does not exist.")
+            logger.debug(f"Source file '{source_path}' does not exist.")
             return False
         
     except Exception as e:
-        print(f"Error moving file: {e}")
+        logger.error("Error moving file: {}".format(source_path))
+        logger.error(f"Error: {e}")
         return False
 
 def create_folder_path(folder_path):
@@ -49,13 +47,13 @@ def create_folder_path(folder_path):
         # Use makedirs to create the directory and its parent directories if they don't exist
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
-            print(f"Folder path '{folder_path}' created successfully.")
+            logger.debug(f"Folder path '{folder_path}' created successfully.")
         else:
-            print(f"Folder already exists '{folder_path}'.")
+            logger.debug(f"Folder already exists '{folder_path}'.")
         
         return True
     except OSError as e:
-        print(f"Error creating folder path '{folder_path}': {e}")
+        logger.error(f"Error creating folder path '{folder_path}': {e}")
         return False
     
 def setup_logging(log_file_path='app.log', log_level=logging.INFO):
@@ -97,6 +95,7 @@ def setup_logging(log_file_path='app.log', log_level=logging.INFO):
 
 def list_all_files_and_folders(directory):
     result = []
+    logger.debug("Scanning for files: {}".format(directory))
     
     def recursive_list(current_directory):
         try:
@@ -106,7 +105,7 @@ def list_all_files_and_folders(directory):
                     if entry.is_dir():
                         recursive_list(entry.path)
         except FileNotFoundError:
-            print(f"The specified directory '{current_directory}' was not found.")
+            logger.error(f"The specified directory '{current_directory}' was not found.")
         except Exception as e:
             print(f"An error occurred: {e}")
             logger.error(f"An error occurred: {e}")
@@ -127,6 +126,7 @@ def write_to_file(file_path, content):
 
 def extract_metadata(image_path):
     # Open the image
+    logger.debug("Extract image info for: {}".format(image_path))
     ret = {}
     with Image.open(image_path) as img:
         # Get the Exif data
@@ -139,9 +139,10 @@ def extract_metadata(image_path):
                 tag_name = TAGS.get(tag, tag)
                 if "date" in tag_name.lower():
                     ret[tag_name] = value
+                    logger.debug(" -{}:{}".format({tag_name},{value}))
                     #print(f"{tag_name}: {value}")
         else:
-            print("No Exif data found.")
+            logger.warn("No Exif data found.")
     return ret
 
 def exit_error(string_error):
@@ -150,10 +151,14 @@ def exit_error(string_error):
 
 if __name__ == "__main__":
     log_file_path = "logs/sortImages.log"
-    logger = setup_logging(log_file_path)
+    logger = setup_logging(log_file_path, logging.DEBUG)
 
     dir_file = "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures/"
-    dir_scan = dir_file + "CameraUploads/Instagram/"
+    dir_scan = dir_file + "CameraUploads/Camera/"
+
+    logger.info("---------------------------------------------------")
+    logger.info("Base dir for sorting: {}".format(dir_file))
+    logger.info("Scanning dir: {}".format(dir_scan))
 
     result_list = list_all_files_and_folders(dir_scan)
 
@@ -217,13 +222,13 @@ if __name__ == "__main__":
                     dd = str(dt.day)
 
                 if (len(str(dt.year)) != 4):
-                    exit_error("Year isn't 4 digets long: " + str(dt.year))
+                    exit_error("Year isn't 4 digits long: " + str(dt.year))
 
                 dir_move_to = dir_file + str(dt.year) + "/" + dm + "/" + dd + "/"
                 if create_folder_path(dir_move_to):
                     if move_file(item, dir_move_to):
-                        logger.info("Successfully moved " + fname + " -to- " + dir_move_to)
+                        logger.info("Successfully moved " + fname + " -to- " + dir_move_to.strip(dir_file))
                     else:
-                        logger.error("failed to moved " + fname + " -to- " + dir_move_to)
+                        logger.error("failed to moved " + fname + " -to- " + dir_move_to.strip(dir_file))
             else:
                 logger.info("Skipping file: " + item)
