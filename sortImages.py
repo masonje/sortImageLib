@@ -4,21 +4,41 @@ import os
 import logging
 from datetime import datetime
 from dateutil import parser
-import dateparser
+import shutil
 
-def parse_unknown_format_datetime(datetime_str):
+def move_file(source_path, destination_folder):
     try:
-        # Attempt to parse the datetime string
-        parsed_datetime = dateparser.parse(datetime_str)
-        
-        if parsed_datetime:
-            return parsed_datetime
+        # Ensure the source file exists
+        if os.path.isfile(source_path):
+            # Ensure the destination folder exists; create it if it doesn't
+            if not os.path.exists(destination_folder):
+                os.makedirs(destination_folder)
+            
+            # Move the file to the destination folder
+            shutil.move(source_path, os.path.join(destination_folder, os.path.basename(source_path)))
+            print(f"File '{source_path}' moved to '{destination_folder}' successfully.")
+            return True
         else:
-            print(f"Unable to parse datetime string: {datetime_str}")
-            return None
+            print(f"Source file '{source_path}' does not exist.")
+            return False
+        
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return None
+        print(f"Error moving file: {e}")
+        return False
+
+def create_folder_path(folder_path):
+    try:
+        # Use makedirs to create the directory and its parent directories if they don't exist
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+            print(f"Folder path '{folder_path}' created successfully.")
+        else:
+            print(f"Folder already exists '{folder_path}'.")
+        
+        return True
+    except OSError as e:
+        print(f"Error creating folder path '{folder_path}': {e}")
+        return False
     
 def setup_logging(log_file_path='app.log', log_level=logging.INFO):
     """
@@ -101,17 +121,23 @@ def extract_metadata(image_path):
                 tag_name = TAGS.get(tag, tag)
                 if "date" in tag_name.lower():
                     ret[tag_name] = value
-                    print(f"{tag_name}: {value}")
+                    #print(f"{tag_name}: {value}")
         else:
             print("No Exif data found.")
     return ret
+
+def exit_error(string_error):
+    logger.error("Quitting on error: {}".format(string_error))
+    quit(1)
 
 if __name__ == "__main__":
     log_file_path = "logs/sortImages.log"
     logger = setup_logging(log_file_path)
 
-    directory_path = "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures/CameraUploads/Alternate/"
-    result_list = list_all_files_and_folders(directory_path)
+    dir_file = "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures/"
+    dir_scan = dir_file + "CameraUploads/Camera/"
+
+    result_list = list_all_files_and_folders(dir_scan)
 
     for item in result_list:
         logger.debug("File: " + item)
@@ -122,38 +148,56 @@ if __name__ == "__main__":
             file_name = split_tup[0]
             file_extension = split_tup[1]
 
-            pdt = '2000:00:00:00 00:00:00'
+            process_file = False
+            pdt = '2000:01:01 00:00:00'
+            pdt_format = '%Y:%m:%d %H:%M:%S'
 
             if file_extension == '.jpg':
                 file_info = extract_metadata(item)
                 if "DateTimeOriginal" in file_info.keys():
                     pdt = file_info['DateTimeOriginal']
+                process_file = True
+            elif file_extension == '.mp4':
+                fname = os.path.basename(item)
+                dy = fname[:4]
+                dm = fname[4:6]
+                dd = fname[6:8]
+                pdt = "{}:{}:{} 00:00:00".format(dy, dm, dd)
+                logger.debug("Format build: {}".format(pdt))
 
-            x = parse_unknown_format_datetime(pdt)
-            dt = datetime.strptime(pdt, '%Y:%m:%d %H:%M:%S')
+                #validate all of the date values pulled
+                if int(dy) in range(2000, 2050):
+                    if int(dm) in range(1, 13):
+                        if int(dd) in range(1, 32):
+                            process_file = True
+                        else:
+                            exit_error("Projected date out of expected range 1-31 {}".format(pdt))
+                    else:
+                        exit_error("Projected month out of expected range 1-12 {}".format(pdt))
+                else:
+                    exit_error("Projected year out of expected range 2000-2050 {}".format(pdt))
 
-            print(dt.year, dt.month, dt.day)
+            #ensure we want to process that type of file
+            if process_file:
+                dt = datetime.strptime(pdt, pdt_format)
+                if (len(str(dt.month)) == 1):
+                    dm = "0" + str(dt.month)
+                else:
+                    dm = str(dt.month)
 
+                if (len(str(dt.day)) == 1):
+                    dd = "0" + str(dt.day)
+                else:
+                    dd = str(dt.day)
 
+                if (len(str(dt.year)) != 4):
+                    exit_error("Year isn't 4 digets long: " + str(dt.year))
 
-
-    # extract_metadata(image_path)
-
-
-
-# if __name__ == "__main__":
-#     directory_path = "/run/user/1000/gvfs/smb-share:server=nas.local,share=pictures/CameraUploads/"
-
-#     log_file_path = "logs/deadboltCleanup.log"
-#     logger = setup_logging(log_file_path)
-
-    
-#     skip_this=["@Recycle",".Trash-1000", "@Recently-Snapshot", '.syncing_db','.@QNAPCloudDriveSyncTemp_0_1']
-#     items = os.listdir(directory_path)
-#     directories = [item for item in items if os.path.isdir(os.path.join(directory_path, item))]
-
-
-#     for d in directories:
-#         if d not in skip_this:
-#             print("Loading " + d)
-#             copy_files_over(directory_path + "/" + d)
+                dir_move_to = dir_file + str(dt.year) + "/" + dm + "/" + dd + "/"
+                if create_folder_path(dir_move_to):
+                    if move_file(item, dir_move_to):
+                        logger.info("Successfully moved " + item + " -to- " + dir_move_to)
+                    else:
+                        logger.error("failed to moved " + item + " -to- " + dir_move_to)
+            else:
+                logger.info("Skipping file: " + item)
