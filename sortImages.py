@@ -143,23 +143,28 @@ def write_to_file(file_path, content):
 def extract_metadata(image_path):
     # Open the image
     logger.debug("Extract image info for: {}".format(image_path))
-    ret = {}
-    with Image.open(image_path) as img:
-        # Get the Exif data
-        exif_data = img._getexif()
+    ret={}
+    try:
+        with Image.open(image_path) as img:
+            # Get the Exif data
+            exif_data = img._getexif()
 
-        # Check if there is any Exif data
-        if exif_data is not None:
-            # Iterate through Exif data and print metadata
-            for tag, value in exif_data.items():
-                tag_name = TAGS.get(tag, tag)
-                if "date" in tag_name.lower():
-                    ret[tag_name] = value
-                    logger.debug(" -{}:{}".format({tag_name},{value}))
-                    #print(f"{tag_name}: {value}")
-        else:
-            logger.warning("No Exif data found.")
-    return ret
+            # Check if there is any Exif data
+            if exif_data is not None:
+                # Iterate through Exif data and print metadata
+                for tag, value in exif_data.items():
+                    tag_name = TAGS.get(tag, tag)
+                    if "date" in tag_name.lower():
+                        ret[tag_name] = value
+                        logger.debug(" -{}:{}".format({tag_name},{value}))
+                        #print(f"{tag_name}: {value}")
+            else:
+                logger.warning("No Exif data found.")
+        return ret
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return ret
+    
 
 def exit_error(string_error):
     logger.error("Quitting on error: {}".format(string_error))
@@ -249,14 +254,26 @@ if __name__ == "__main__":
                                 if int(dd) in range(1, 32):
                                     process_file = True
                                 else:
-                                    exit_error("Projected date out of expected range 1-31 {}".format(pdt))
+                                    logger.error("Projected date out of expected range 1-31 {}".format(pdt))
                             else:
-                                exit_error("Projected month out of expected range 1-12 {}".format(pdt))
+                                logger.error("Projected month out of expected range 1-12 {}".format(pdt))
                         else:
-                            exit_error("Projected year out of expected range 2000-2050 {}".format(pdt))
+                            logger.error("Projected year out of expected range 2000-2050 {}".format(pdt))
+
+                        # Failed to get date info from video name.
+                        # Pull the information from the file system info. 
+                        if process_file == False:
+                            logger.info("Pulling date from file system attributes")
+                            pdt = datetime.utcfromtimestamp(creation_date(item)).strftime(pdt_format)
+                            process_file = True
+
                     except Exception as err:
                         logger.error("Processing date from file name {}".format(fname))
                         logger.error(f"Unexpected {err=}, {type(err)=}")
+
+                        logger.info("Pulling date from file system attributes")
+                        pdt = datetime.utcfromtimestamp(creation_date(item)).strftime(pdt_format)
+                        process_file = True
                 else:
                     logger.warning("Unknown file type in {}".format(fname) )
 
