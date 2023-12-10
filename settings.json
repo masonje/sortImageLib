@@ -1,11 +1,13 @@
 {
-    "logfile": "logs/sortImages.log",
-    "scanRoot": "/run/user/1000/gvfs/smb-share:server=nas.local,share=multimedia",
+    "logDir": "./logs",
+    "logfile": "sortImages.log",
+    "logfileMaxSize": 1024,
+    "scanRoot": ".",
     "scanDir": "CameraUploads",
     "scanDirs": [
         "Camera",
         "Internal storage/DCIM/Camera/",
         "Pictures"
     ],
-    "targetRootDir": "/run/user/1000/gvfs/smb-share:server=nas.local,share=multimedia/Pictures"
+    "targetRootDir": "./Pictures"
 }
