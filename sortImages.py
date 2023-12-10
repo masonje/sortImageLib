@@ -109,24 +109,23 @@ def setup_logging(log_file_path='app.log', log_level=logging.INFO):
 
     return logger
 
-def list_all_files_and_folders(directory):
-    result = []
-    logger.debug("Scanning for files: {}".format(directory))
-    
-    def recursive_list(current_directory):
-        try:
-            with os.scandir(current_directory) as entries:
-                for entry in entries:
-                    result.append(entry.path)
-                    if entry.is_dir():
-                        recursive_list(entry.path)
-        except FileNotFoundError:
-            logger.error(f"The specified directory '{current_directory}' was not found.")
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            logger.error(f"An error occurred: {e}")
-            #quit()
-        
+def get_files_recursively(directory_path):
+    try:
+        # Initialize an empty list to store file names
+        files = []
+
+        # Walk through the directory tree using os.walk
+        for root, dirs, filenames in os.walk(directory_path):
+            # Skip hidden folders by removing them from the list of directories
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            
+            # Add the file names to the list
+            files.extend([os.path.join(root, file) for file in filenames])
+
+        return files
+    except OSError as e:
+        print(f"Error: {e}")
+        return None
 
     # Start the recursive listing
     recursive_list(directory)
@@ -164,7 +163,24 @@ def extract_metadata(image_path):
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return ret
-    
+
+def prune_log_files(directory_path, max_file_size_bytes):
+    try:
+        # Walk through the directory tree using os.walk
+        for root, dirs, filenames in os.walk(directory_path):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+
+                # Check if the file is a log file and exceeds the max size
+                if filename.endswith(".log") and os.path.getsize(file_path) > max_file_size_bytes:
+                    print(f"Pruning {file_path}...")
+                    
+                    # Open the file in write mode to truncate its content
+                    with open(file_path, 'w') as log_file:
+                        log_file.truncate()
+
+    except OSError as e:
+        print(f"Error: {e}")
 
 def exit_error(string_error):
     logger.error("Quitting on error: {}".format(string_error))
@@ -186,13 +202,16 @@ if __name__ == "__main__":
     json_file_path = "./settings.json"
     settings = read_settings_from_json(json_file_path)
 
-    log_file_path = get_json_value(settings, "logfile")
+    log_file_dir = get_json_value(settings, "logDir")
+    log_file = get_json_value(settings, "logfile")
+    log_file_path = log_file_dir + "/" + log_file
+    log_file_path_size = get_json_value(settings, "logfileMaxSize")
     dir_file = get_json_value(settings, "scanRoot")
     dirs_scan = get_json_value(settings, "scanDirs")
     dir_scan_core = get_json_value(settings, "scanDir")
-
     targetRootDir = get_json_value(settings, "targetRootDir")
 
+    prune_log_files(log_file_dir, int(log_file_path_size))
 
     logger = setup_logging(log_file_path)
     #logger = setup_logging(log_file_path, logging.DEBUG)
@@ -207,7 +226,7 @@ if __name__ == "__main__":
         logger.info("-------------------")
         logger.info("Scanning dir: {}".format(dir_scan))
 
-        result_list = list_all_files_and_folders(dir_scan)
+        result_list = get_files_recursively(dir_scan)
         logger.info("Number of items returned: {}".format(str(len(result_list))))
 
         for item in result_list:
